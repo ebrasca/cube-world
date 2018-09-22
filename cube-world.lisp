@@ -42,50 +42,36 @@
 
 ;;--------------------------------------------------------------
 ;; CPU
-(defstruct chunk
-  (offset)
-  (array-offsets)
-  (array-offsets-length)
-  (stream))
+(defclass chunk ()
+  ((offset :accessor chunk-offset :initarg :offset)
+   (n-blocks :accessor chunk-n-blocks :initarg :n-blocks)
+   (gpu-blocks :accessor chunk-gpu-blocks :initarg :gpu-blocks)
+   (gpu-stream :accessor chunk-gpu-stream :initarg :gpu-stream)))
 
-(defun generate-chunk (ox oy oz)
-  (time
-   (flet ((noise (x y z)
-            (loop :for i :from 1 :to 7 :sum
-                  (* (ash 1 i)
-                     (noise-3d (/ (+ ox x)
-                                  (ash 1 (1- i)) 1.0d0)
-                               (/ (+ oy y)
-                                  (ash 1 (1- i)) 1.0d0)
-                               (/ (+ oz z)
-                                  (ash 1 (1- i)) 1.0d0))))))
-     (let ((positions (loop :for z :below 64 :append
-                            (loop :for y :below 64 :append
-                                  (loop :for x :below 64
-                                        :for noise := (noise x y z)
-                                        :when (and (< noise 0)
-                                                   ;; filtra cubos no visibles testing purpose
-                                                   ;; (not
-                                                   ;;  (and
-                                                   ;;   (< (noise (1- x) y z) 0)
-                                                   ;;   (< (noise x (1- y) z) 0)
-                                                   ;;   (< (noise x y (1- z)) 0)
-                                                   ;;   (< (noise (1+ x) y z) 0)
-                                                   ;;   (< (noise x (1+ y) z) 0)
-                                                   ;;   (< (noise x y (1+ z)) 0)))
-                                                   )
-                                        :collect (v! x y z))))))
-       (unless (zerop (length positions))
-         (let ((gpu-positions (make-gpu-array positions :dimensions (length positions) :element-type :vec3)))
-           (make-chunk :offset (v! ox oy oz 1.0)
-                       :array-offsets gpu-positions
-                       :array-offsets-length (length positions)
-                       :stream (make-buffer-stream (list *verts* (cons gpu-positions 1))
-                                                   :index-array *index*))))))))
+(defun make-chunk (ox oy oz)
+  (let* ((blocks (loop :for z :below 64 :append
+                       (loop :for y :below 64 :append
+                             (loop :for x :below 64
+                                   :for noise := (loop :for i :from 1 :to 7 :sum
+                                                       (* (ash 1 i)
+                                                          (noise-3d (/ (+ ox x) (ash 1 (1- i)) 1.0d0)
+                                                                    (/ (+ oy y) (ash 1 (1- i)) 1.0d0)
+                                                                    (/ (+ oz z) (ash 1 (1- i)) 1.0d0))))
+                                   :when (and (< noise 0))
+                                   :collect (v! x y z)))))
+         (blocks-length (length blocks)))
+    (unless (zerop blocks-length)
+      (let ((gpu-blocks (make-gpu-array blocks :dimensions blocks-length :element-type :vec3)))
+        (make-instance 'chunk
+                       :offset (v! ox oy oz 1.0)
+                       :n-blocks blocks-length
+                       :gpu-blocks gpu-blocks
+                       :gpu-stream (make-buffer-stream (list *verts* (cons gpu-blocks 1))
+                                                       :index-array *index*))))))
 
 (defun free-chunk (chunk)
-  (free (chunk-array-offsets chunk))
-  (free (chunk-stream chunk)))
+  (free (chunk-gpu-blocks chunk))
+  (free (chunk-gpu-stream chunk)))
 
 (defun now ()
   (* 0.01 (get-internal-real-time)))
@@ -102,12 +88,9 @@
     (dotimes (z 2)
       (dotimes (y 2)
         (dotimes (x 2)
-          (let ((chunk (generate-chunk (* x 64.0)
-                                       (* y 64.0)
-                                       (* z 64.0))))
+          (let ((chunk (make-chunk (* x 64.0) (* y 64.0) (* z 64.0))))
             (when chunk
-              (push chunk
-                    *chunks*)))))))
+              (push chunk *chunks*)))))))
   (when (keyboard-button (keyboard) key.r)
     (setf (camera-pos *camera*) (v! 0 0 -6)
           (camera-rot *camera*) (q! 1.0 0.0 0.0 0.0)))
@@ -135,14 +118,13 @@
              (v! 0.0 1.0 0.0)))
   ;; draw chunks
   (dolist (chunk *chunks*)
-    (with-instances (chunk-array-offsets-length chunk)
-      (map-g #'prog-1 (chunk-stream chunk)
+    (with-instances (chunk-n-blocks chunk)
+      (map-g #'prog-1 (chunk-gpu-stream chunk)
              :model->world (m4:translation (chunk-offset chunk))
              :world->cam (m4:* (q:to-mat4 (camera-rot *camera*))
                                (m4:translation (camera-pos *camera*)))
              :cam->clip (cepl.camera:cam->clip *camera*)
              :tex *sampler*)))
-  
   (swap)
   (decay-events))
 
@@ -171,15 +153,9 @@
     (setf *texture* (with-c-array-freed
                         (temp (make-c-array (loop :for i :below 2 :collect
                                                   (loop :for j :below 2 :collect
-                                                        (v! (noise-3d (/ i 1.0d0)
-                                                                      (/ j 1.0d0)
-                                                                      0.0d0)
-                                                            (noise-3d (/ i 1.0d0)
-                                                                      (/ j 1.0d0)
-                                                                      1.0d0)
-                                                            (noise-3d (/ i 1.0d0)
-                                                                      (/ j 1.0d0)
-                                                                      2.0d0)
+                                                        (v! (noise-3d (/ i 1.0d0) (/ j 1.0d0) 0.0d0)
+                                                            (noise-3d (/ i 1.0d0) (/ j 1.0d0) 1.0d0)
+                                                            (noise-3d (/ i 1.0d0) (/ j 1.0d0) 2.0d0)
                                                             1.0)))
                                             :dimensions '(2 2) :element-type :uint8-vec4))
                       (make-texture temp))
@@ -188,12 +164,9 @@
     (dotimes (z 2)
       (dotimes (y 2)
         (dotimes (x 2)
-          (let ((chunk (generate-chunk (* x 64.0)
-                                       (* y 64.0)
-                                       (* z 64.0))))
+          (let ((chunk (make-chunk (* x 64.0) (* y 64.0) (* z 64.0))))
             (when chunk
-              (push chunk
-                    *chunks*))))))
+              (push chunk *chunks*))))))
     (loop :while (and running (not (shutting-down-p))) :do
           (continuable (step-demo))))
   (defun stop-loop () (setf running nil)))

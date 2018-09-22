@@ -58,11 +58,11 @@
                                                                     (/ (+ oy y) (ash 1 (1- i)) 1.0d0)
                                                                     (/ (+ oz z) (ash 1 (1- i)) 1.0d0))))
                                    :when (and (< noise 0))
-                                   :collect (v! x y z)))))
+                                   :collect (v! x y (- z))))))
          (blocks-length (length blocks)))
     (unless (zerop blocks-length)
       (make-instance 'chunk
-                     :offset (v! ox oy oz 1.0)
+                     :offset (v! ox oy (- oz) 1.0)
                      :blocks blocks
                      :n-blocks blocks-length))))
 

@@ -10,6 +10,7 @@
 (defparameter *verts* nil)
 (defparameter *index* nil)
 (defparameter *chunks* nil)
+(defparameter *gpu-chunks* nil)
 
 (defparameter *texture* nil)
 (defparameter *sampler* nil)
@@ -44,9 +45,8 @@
 ;; CPU
 (defclass chunk ()
   ((offset :accessor chunk-offset :initarg :offset)
-   (n-blocks :accessor chunk-n-blocks :initarg :n-blocks)
-   (gpu-blocks :accessor chunk-gpu-blocks :initarg :gpu-blocks)
-   (gpu-stream :accessor chunk-gpu-stream :initarg :gpu-stream)))
+   (blocks :accessor chunk-blocks :initarg :blocks)
+   (n-blocks :accessor chunk-n-blocks :initarg :n-blocks)))
 
 (defun make-chunk (ox oy oz)
   (let* ((blocks (loop :for z :below 64 :append
@@ -61,17 +61,10 @@
                                    :collect (v! x y z)))))
          (blocks-length (length blocks)))
     (unless (zerop blocks-length)
-      (let ((gpu-blocks (make-gpu-array blocks :dimensions blocks-length :element-type :vec3)))
-        (make-instance 'chunk
-                       :offset (v! ox oy oz 1.0)
-                       :n-blocks blocks-length
-                       :gpu-blocks gpu-blocks
-                       :gpu-stream (make-buffer-stream (list *verts* (cons gpu-blocks 1))
-                                                       :index-array *index*))))))
-
-(defun free-chunk (chunk)
-  (free (chunk-gpu-blocks chunk))
-  (free (chunk-gpu-stream chunk)))
+      (make-instance 'chunk
+                     :offset (v! ox oy oz 1.0)
+                     :blocks blocks
+                     :n-blocks blocks-length))))
 
 (defun now ()
   (* 0.01 (get-internal-real-time)))
@@ -82,15 +75,20 @@
   (clear)
   ;; keyboard events
   (when (keyboard-button (keyboard) key.c)
-    (dolist (chunk *chunks*)
-      (free-chunk chunk))
-    (setf *chunks* nil)
+    (loop :for (chunk gpu-stream gpu-blocks) :in *gpu-chunks* :do
+          (progn (free gpu-stream)
+                 (free gpu-blocks)))
+    (setf *gpu-chunks* nil)
     (dotimes (z 2)
       (dotimes (y 2)
         (dotimes (x 2)
           (let ((chunk (make-chunk (* x 64.0) (* y 64.0) (* z 64.0))))
             (when chunk
-              (push chunk *chunks*)))))))
+              (let* ((gpu-blocks (make-gpu-array (chunk-blocks chunk)
+                                                 :dimensions (chunk-n-blocks chunk) :element-type :vec3))
+                     (gpu-stream (make-buffer-stream (list *verts* (cons gpu-blocks 1))
+                                                     :index-array *index*)))
+                (push (list chunk gpu-stream gpu-blocks) *gpu-chunks*))))))))
   (when (keyboard-button (keyboard) key.r)
     (setf (camera-pos *camera*) (v! 0 0 -6)
           (camera-rot *camera*) (q! 1.0 0.0 0.0 0.0)))
@@ -117,14 +115,14 @@
     (v3:incf (camera-pos *camera*)
              (v! 0.0 1.0 0.0)))
   ;; draw chunks
-  (dolist (chunk *chunks*)
-    (with-instances (chunk-n-blocks chunk)
-      (map-g #'prog-1 (chunk-gpu-stream chunk)
-             :model->world (m4:translation (chunk-offset chunk))
-             :world->cam (m4:* (q:to-mat4 (camera-rot *camera*))
-                               (m4:translation (camera-pos *camera*)))
-             :cam->clip (cepl.camera:cam->clip *camera*)
-             :tex *sampler*)))
+  (loop :for (chunk gpu-stream) :in *gpu-chunks* :do
+        (with-instances (chunk-n-blocks chunk)
+          (map-g #'prog-1 gpu-stream
+                 :model->world (m4:translation (chunk-offset chunk))
+                 :world->cam (m4:* (q:to-mat4 (camera-rot *camera*))
+                                   (m4:translation (camera-pos *camera*)))
+                 :cam->clip (cepl.camera:cam->clip *camera*)
+                 :tex *sampler*)))
   (swap)
   (decay-events))
 
@@ -166,7 +164,11 @@
         (dotimes (x 2)
           (let ((chunk (make-chunk (* x 64.0) (* y 64.0) (* z 64.0))))
             (when chunk
-              (push chunk *chunks*))))))
+              (let* ((gpu-blocks (make-gpu-array (chunk-blocks chunk)
+                                                 :dimensions (chunk-n-blocks chunk) :element-type :vec3))
+                     (gpu-stream (make-buffer-stream (list *verts* (cons gpu-blocks 1))
+                                                     :index-array *index*)))
+                (push (list chunk gpu-stream gpu-blocks) *gpu-chunks*)))))))
     (loop :while (and running (not (shutting-down-p))) :do
           (continuable (step-demo))))
   (defun stop-loop () (setf running nil)))

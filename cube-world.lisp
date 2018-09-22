@@ -9,14 +9,12 @@
 
 (defparameter *verts* nil)
 (defparameter *index* nil)
-(defparameter *chunk* nil)
 (defparameter *chunks* nil)
 
 (defparameter *texture* nil)
 (defparameter *sampler* nil)
 
 (defvar *camera* nil)
-(defparameter *old* (v! 0 0 0))
 
 ;;--------------------------------------------------------------
 ;; GPU
@@ -30,7 +28,7 @@
              world->cam
              model->world
              (+ (pos g-pct) (v! offset 0)))
-          (tan (col g-pct))
+          (col g-pct)
           (:smooth (tex g-pct))))
 
 (defun-g frag ((pos :vec4) (tex-coord :vec2) &uniform (tex :sampler-2d))
@@ -52,7 +50,7 @@
 
 (defun generate-chunk (ox oy oz)
   (time
-   (flet ((temp (x y z)
+   (flet ((noise (x y z)
             (loop :for i :from 1 :to 7 :sum
                   (* (ash 1 i)
                      (noise-3d (/ (+ ox x)
@@ -61,21 +59,20 @@
                                   (ash 1 (1- i)) 1.0d0)
                                (/ (+ oz z)
                                   (ash 1 (1- i)) 1.0d0))))))
-     (dotimes (z 10))
      (let ((positions (loop :for z :below 64 :append
                             (loop :for y :below 64 :append
                                   (loop :for x :below 64
-                                        :for noise := (temp x y z)
+                                        :for noise := (noise x y z)
                                         :when (and (< noise 0)
                                                    ;; filtra cubos no visibles testing purpose
                                                    ;; (not
                                                    ;;  (and
-                                                   ;;   (< (temp (1- x) y z) 0)
-                                                   ;;   (< (temp x (1- y) z) 0)
-                                                   ;;   (< (temp x y (1- z)) 0)
-                                                   ;;   (< (temp (1+ x) y z) 0)
-                                                   ;;   (< (temp x (1+ y) z) 0)
-                                                   ;;   (< (temp x y (1+ z)) 0)))
+                                                   ;;   (< (noise (1- x) y z) 0)
+                                                   ;;   (< (noise x (1- y) z) 0)
+                                                   ;;   (< (noise x y (1- z)) 0)
+                                                   ;;   (< (noise (1+ x) y z) 0)
+                                                   ;;   (< (noise x (1+ y) z) 0)
+                                                   ;;   (< (noise x y (1+ z)) 0)))
                                                    )
                                         :collect (v! x y z))))))
        (unless (zerop (length positions))
@@ -93,20 +90,11 @@
 (defun now ()
   (* 0.01 (get-internal-real-time)))
 
-(defun mouse-units ()
-  (v3:- (v! (map 'list #'round
-                 (v2:* (v! (/ 32.0 0.5625) -32.0)
-                       (v2:- (v2:/ (mouse-pos (mouse))
-                                   (v! *width* *height*))
-                             (v! 0.5 0.5))))
-            0)
-        (camera-pos *camera*)))
-
 (defun step-demo ()
   (step-host)
   (update-repl-link)
   (clear)
-
+  ;; keyboard events
   (when (keyboard-button (keyboard) key.c)
     (dolist (chunk *chunks*)
       (free-chunk chunk))
@@ -120,18 +108,15 @@
             (when chunk
               (push chunk
                     *chunks*)))))))
-
   (when (keyboard-button (keyboard) key.r)
     (setf (camera-pos *camera*) (v! 0 0 -6)
           (camera-rot *camera*) (q! 1.0 0.0 0.0 0.0)))
-  
   (when (keyboard-button (keyboard) key.w)
     (v3:decf (camera-pos *camera*)
              (m3:mrow*vec3 (v! 0.0 0.0 -1.0) (q:to-mat3 (camera-rot *camera*)))))
   (when (keyboard-button (keyboard) key.s)
     (v3:incf (camera-pos *camera*)
              (m3:mrow*vec3 (v! 0.0 0.0 -1.0) (q:to-mat3 (camera-rot *camera*)))))
-  
   (when (keyboard-button (keyboard) key.a)
     (setf (camera-rot *camera*)
           (q:normalize
@@ -148,7 +133,7 @@
   (when (keyboard-button (keyboard) key.e)
     (v3:incf (camera-pos *camera*)
              (v! 0.0 1.0 0.0)))
-
+  ;; draw chunks
   (dolist (chunk *chunks*)
     (with-instances (chunk-array-offsets-length chunk)
       (map-g #'prog-1 (chunk-stream chunk)
@@ -164,8 +149,8 @@
 (let ((running nil))
   (defun run-loop ()
     (setf running t
-          *camera* (make-camera :pos (v! 0 0 0))
-          ;; cube
+          *camera* (make-camera)
+          ;; create cube
           *verts* (make-gpu-array `((,(v! -0.5 -0.5 -0.5 1.0) ,(v! -0.5 -0.5 -0.5 1.0) ,(v! 0.0 0.0))
                                     (,(v!  0.5 -0.5 -0.5 1.0) ,(v!  0.5 -0.5 -0.5 1.0) ,(v! 1.0 0.0))
                                     (,(v!  0.5  0.5 -0.5 1.0) ,(v!  0.5  0.5 -0.5 1.0) ,(v! 1.0 1.0))
@@ -182,10 +167,10 @@
                                     1 5 4  4 0 1
                                     4 5 6  6 7 4)
                                   :dimensions 36 :element-type :unsigned-short))
-    ;; texture
+    ;; create texture
     (setf *texture* (with-c-array-freed
-                        (temp (make-c-array (loop :for i :below 16 :collect
-                                                  (loop :for j :below 16 :collect
+                        (temp (make-c-array (loop :for i :below 2 :collect
+                                                  (loop :for j :below 2 :collect
                                                         (v! (noise-3d (/ i 1.0d0)
                                                                       (/ j 1.0d0)
                                                                       0.0d0)
@@ -196,13 +181,9 @@
                                                                       (/ j 1.0d0)
                                                                       2.0d0)
                                                             1.0)))
-                                            :dimensions '(16 16) :element-type :uint8-vec4))
+                                            :dimensions '(2 2) :element-type :uint8-vec4))
                       (make-texture temp))
           *sampler* (sample *texture*))
-    ;; clean chunks
-    (dolist (chunk *chunks*)
-      (free-chunk chunk))
-    (setf *chunks* nil)
     ;; create chunks
     (dotimes (z 2)
       (dotimes (y 2)

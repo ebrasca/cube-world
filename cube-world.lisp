@@ -34,9 +34,9 @@
           (:smooth (tex g-pct))))
 
 (defun-g frag ((pos :vec4) (tex-coord :vec2) &uniform (tex :sampler-2d))
-  (abs pos)
-  ;;(texture tex tex-coord)
-  )
+  (/ (+ (abs pos)
+        (texture tex tex-coord))
+     2))
 
 (defpipeline-g prog-1 ()
   (vert g-pct :vec3)
@@ -184,25 +184,19 @@
                                   :dimensions 36 :element-type :unsigned-short))
     ;; texture
     (setf *texture* (with-c-array-freed
-                        (temp
-                         (make-c-array
-                          (loop :for i :below 16 :collect
-                                (loop :for j :below 16 :collect
-                                      (loop :for k :below 3 :collect
-                                            (loop :with res := 0
-                                                  :for e :from 1 :to 8 :do
-                                                  (setf res
-                                                        (/ (+ res
-                                                              (* (ash 1 e)
-                                                                 (noise-3d (/ i (ash 1 (1- e))
-                                                                              1.0d0)
-                                                                           (/ j (ash 1 (1- e))
-                                                                              1.0d0)
-                                                                           (/ k (ash 1 (1- e))
-                                                                              1.0d0))))
-                                                           e))
-                                                  :finally (return (list res res res))))))
-                          :dimensions '(16 16) :element-type :uint8-vec4))
+                        (temp (make-c-array (loop :for i :below 16 :collect
+                                                  (loop :for j :below 16 :collect
+                                                        (v! (noise-3d (/ i 1.0d0)
+                                                                      (/ j 1.0d0)
+                                                                      0.0d0)
+                                                            (noise-3d (/ i 1.0d0)
+                                                                      (/ j 1.0d0)
+                                                                      1.0d0)
+                                                            (noise-3d (/ i 1.0d0)
+                                                                      (/ j 1.0d0)
+                                                                      2.0d0)
+                                                            1.0)))
+                                            :dimensions '(16 16) :element-type :uint8-vec4))
                       (make-texture temp))
           *sampler* (sample *texture*))
     ;; clean chunks

@@ -22,7 +22,7 @@
 (defstruct-g g-pct
   (position :vec4 :accessor pos)
   (color :vec4 :accessor col)
-  (texture :vec2 :accessor tex))
+  (texture :vec3 :accessor tex))
 
 (defun-g vert ((g-pct g-pct) (offset :vec3) &uniform (model->world :mat4) (world->cam :mat4) (cam->clip :mat4))
   (values (* cam->clip
@@ -32,14 +32,12 @@
           (col g-pct)
           (:smooth (tex g-pct))))
 
-(defun-g frag ((pos :vec4) (tex-coord :vec2) &uniform (tex :sampler-2d))
-  (/ (+ (abs pos)
-        (texture tex tex-coord))
-     2))
+(defun-g frag ((col :vec4) (tex-coord :vec3) &uniform (tex :sampler-3d))
+  (/ (+ col (texture tex tex-coord)) 2))
 
 (defpipeline-g prog-1 ()
   (vert g-pct :vec3)
-  (frag :vec4 :vec2))
+  (frag :vec4 :vec3))
 
 ;;--------------------------------------------------------------
 ;; CPU
@@ -131,14 +129,14 @@
     (setf running t
           *camera* (make-camera)
           ;; create cube
-          *verts* (make-gpu-array `((,(v! -0.5 -0.5 -0.5 1.0) ,(v! -0.5 -0.5 -0.5 1.0) ,(v! 0.0 0.0))
-                                    (,(v!  0.5 -0.5 -0.5 1.0) ,(v!  0.5 -0.5 -0.5 1.0) ,(v! 1.0 0.0))
-                                    (,(v!  0.5  0.5 -0.5 1.0) ,(v!  0.5  0.5 -0.5 1.0) ,(v! 1.0 1.0))
-                                    (,(v! -0.5  0.5 -0.5 1.0) ,(v! -0.5  0.5 -0.5 1.0) ,(v! 0.0 1.0))
-                                    (,(v! -0.5 -0.5  0.5 1.0) ,(v! -0.5 -0.5  0.5 1.0) ,(v! 0.0 0.0))
-                                    (,(v!  0.5 -0.5  0.5 1.0) ,(v!  0.5 -0.5  0.5 1.0) ,(v! 1.0 0.0))
-                                    (,(v!  0.5  0.5  0.5 1.0) ,(v!  0.5  0.5  0.5 1.0) ,(v! 1.0 1.0))
-                                    (,(v! -0.5  0.5  0.5 1.0) ,(v! -0.5  0.5  0.5 1.0) ,(v! 0.0 1.0)))
+          *verts* (make-gpu-array `((,(v! -0.5 -0.5 -0.5 1.0) ,(v! -0.5 -0.5 -0.5 1.0) ,(v! 0.0 0.0 0.0))
+                                    (,(v!  0.5 -0.5 -0.5 1.0) ,(v!  0.5 -0.5 -0.5 1.0) ,(v! 1.0 0.0 0.0))
+                                    (,(v!  0.5  0.5 -0.5 1.0) ,(v!  0.5  0.5 -0.5 1.0) ,(v! 1.0 1.0 0.0))
+                                    (,(v! -0.5  0.5 -0.5 1.0) ,(v! -0.5  0.5 -0.5 1.0) ,(v! 0.0 1.0 0.0))
+                                    (,(v! -0.5 -0.5  0.5 1.0) ,(v! -0.5 -0.5  0.5 1.0) ,(v! 0.0 0.0 1.0))
+                                    (,(v!  0.5 -0.5  0.5 1.0) ,(v!  0.5 -0.5  0.5 1.0) ,(v! 1.0 0.0 1.0))
+                                    (,(v!  0.5  0.5  0.5 1.0) ,(v!  0.5  0.5  0.5 1.0) ,(v! 1.0 1.0 1.0))
+                                    (,(v! -0.5  0.5  0.5 1.0) ,(v! -0.5  0.5  0.5 1.0) ,(v! 0.0 1.0 1.0)))
                                   :dimensions 8 :element-type 'g-pct)
           *index* (make-gpu-array '(0 3 2  2 1 0
                                     0 4 7  7 3 0
@@ -151,11 +149,12 @@
     (setf *texture* (with-c-array-freed
                         (temp (make-c-array (loop :for i :below 2 :collect
                                                   (loop :for j :below 2 :collect
-                                                        (v! (noise-3d (/ i 1.0d0) (/ j 1.0d0) 0.0d0)
-                                                            (noise-3d (/ i 1.0d0) (/ j 1.0d0) 1.0d0)
-                                                            (noise-3d (/ i 1.0d0) (/ j 1.0d0) 2.0d0)
-                                                            1.0)))
-                                            :dimensions '(2 2) :element-type :uint8-vec4))
+                                                        (loop :for k :below 2 :collect
+                                                              (v! (noise-3d (/ i 1.0d0) (/ j 1.0d0) (/ k 1.0d0))
+                                                                  (noise-3d (/ i 1.0d0) (/ j 1.0d0) (/ k 1.0d0))
+                                                                  (noise-3d (/ i 1.0d0) (/ j 1.0d0) (/ k 1.0d0))
+                                                                  1.0))))
+                                            :dimensions '(2 2 2) :element-type :uint8-vec4))
                       (make-texture temp))
           *sampler* (sample *texture*))
     ;; create chunks

@@ -60,7 +60,7 @@
          (blocks-length (length blocks)))
     (unless (zerop blocks-length)
       (make-instance 'chunk
-                     :offset (v! ox oy (- oz) 1.0)
+                     :offset (v! ox oy oz 1.0)
                      :blocks blocks
                      :n-blocks blocks-length))))
 
@@ -80,7 +80,7 @@
     (dotimes (z 2)
       (dotimes (y 2)
         (dotimes (x 2)
-          (let ((chunk (make-chunk (* x 64.0) (* y 64.0) (* z 64.0))))
+          (let ((chunk (make-chunk (* x 64.0) (* y 64.0) (* z -64.0))))
             (when chunk
               (let* ((gpu-blocks (make-gpu-array (chunk-blocks chunk)
                                                  :dimensions (chunk-n-blocks chunk) :element-type :vec3))
@@ -88,14 +88,14 @@
                                                      :index-array *index*)))
                 (push (list chunk gpu-stream gpu-blocks) *gpu-chunks*))))))))
   (when (keyboard-button (keyboard) key.r)
-    (setf (camera-pos *camera*) (v! 0 0 -6)
+    (setf (camera-pos *camera*) (v! 0 0 0)
           (camera-rot *camera*) (q! 1.0 0.0 0.0 0.0)))
   (when (keyboard-button (keyboard) key.w)
     (v3:decf (camera-pos *camera*)
-             (m3:mrow*vec3 (v! 0.0 0.0 -1.0) (q:to-mat3 (camera-rot *camera*)))))
+             (m3:mrow*vec3 (v! 0.0 0.0 1.0) (q:to-mat3 (camera-rot *camera*)))))
   (when (keyboard-button (keyboard) key.s)
     (v3:incf (camera-pos *camera*)
-             (m3:mrow*vec3 (v! 0.0 0.0 -1.0) (q:to-mat3 (camera-rot *camera*)))))
+             (m3:mrow*vec3 (v! 0.0 0.0 1.0) (q:to-mat3 (camera-rot *camera*)))))
   (when (keyboard-button (keyboard) key.a)
     (setf (camera-rot *camera*)
           (q:normalize
@@ -118,7 +118,7 @@
           (map-g #'prog-1 gpu-stream
                  :model->world (m4:translation (chunk-offset chunk))
                  :world->cam (m4:* (q:to-mat4 (camera-rot *camera*))
-                                   (m4:translation (camera-pos *camera*)))
+                                   (m4:translation (v4:* (v! -1 -1 -1 1) (camera-pos *camera*))))
                  :cam->clip (cepl.camera:cam->clip *camera*)
                  :tex *sampler*)))
   (swap)
@@ -161,7 +161,7 @@
     (dotimes (z 2)
       (dotimes (y 2)
         (dotimes (x 2)
-          (let ((chunk (make-chunk (* x 64.0) (* y 64.0) (* z 64.0))))
+          (let ((chunk (make-chunk (* x 64.0) (* y 64.0) (* z -64.0))))
             (when chunk
               (let* ((gpu-blocks (make-gpu-array (chunk-blocks chunk)
                                                  :dimensions (chunk-n-blocks chunk) :element-type :vec3))

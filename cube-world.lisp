@@ -32,7 +32,8 @@
           (:smooth (tex g-pct))))
 
 (defun-g frag ((col :vec4) (tex-coord :vec3) &uniform (tex :sampler-3d))
-  (texture tex tex-coord))
+  col ;;(texture tex tex-coord)
+  )
 
 (defpipeline-g prog-1 ()
   (vert g-pct :vec3)
@@ -169,18 +170,16 @@
                                     1 5 4  4 0 1
                                     4 5 6  6 7 4)
                                   :dimensions 36 :element-type :unsigned-short))
-    ;; create texture
-    (setf *texture* (with-c-array-freed
-                        (temp (make-c-array (loop :for i :below 2 :collect
-                                                  (loop :for j :below 2 :collect
-                                                        (loop :for k :below 2 :collect
-                                                              (v! (noise-3d (/ i 1.0d0) (/ j 1.0d0) (/ k 1.0d0))
-                                                                  (noise-3d (/ i 1.0d0) (/ j 1.0d0) (/ k 1.0d0))
-                                                                  (noise-3d (/ i 1.0d0) (/ j 1.0d0) (/ k 1.0d0))
-                                                                  1.0))))
-                                            :dimensions '(2 2 2) :element-type :uint8-vec4))
-                      (make-texture temp))
-          *sampler* (sample *texture*))
+    ;; ;; create texture
+    ;; (setf *texture* (with-c-array-freed
+    ;;                     (temp (make-c-array (loop :for i :below 8 :collect
+    ;;                                               (loop :for j :below 8 :collect
+    ;;                                                     (loop :for k :below 8 :collect
+    ;;                                                           (v! 0.0 1.0 0.0
+    ;;                                                               1.0))))
+    ;;                                         :dimensions '(8 8 8) :element-type :uint8-vec4))
+    ;;                   (make-texture temp))
+    ;;       *sampler* (sample *texture*))
     (setf *chunks-manager* (make-instance 'chunk-manager))
     (loading *chunks-manager*)
     (loop :while (and running (not (shutting-down-p))) :do

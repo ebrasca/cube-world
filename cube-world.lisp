@@ -100,7 +100,7 @@
           (map-g #'prog-1 gpu-stream
                  :cam->clip (cepl.camera:cam->clip *camera*)
                  :world->cam (m4:* (q:to-mat4 (camera-rot *camera*))
-                                   (m4:translation (v4:* (v! -1 -1 -1 1) (camera-pos *camera*))))
+                                   (m4:translation (v4:* (v! -1 -1 -1 1) (v! (camera-pos *camera*) 1.0))))
                  :model->world (m4:translation (v! (chunk-offset chunk) 1.0))
                  :tex *sampler*))))
 

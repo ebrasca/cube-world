@@ -52,22 +52,26 @@
    :gpu-stream nil))
 
 (defun make-chunk (ox oy oz)
-  (let* ((blocks (loop :for z :below 64 :append
-                       (loop :for y :below 64 :append
-                             (loop :for x :below 64
-                                   :for noise := (loop :for i :from 1 :to 9 :sum
-                                                       (* (ash 1 i)
-                                                          (noise-3d (/ (+ ox x) (ash 1 (1- i)) 1.0d0)
-                                                                    (/ (+ oy y) (ash 1 (1- i)) 1.0d0)
-                                                                    (/ (+ oz z) (ash 1 (1- i)) 1.0d0))))
-                                   :when (and (< noise 0))
-                                   :collect (v! x y (- z))))))
-         (blocks-length (length blocks)))
-    (unless (zerop blocks-length)
-      (make-instance 'chunk
-                     :offset (v! ox oy oz)
-                     :blocks blocks
-                     :n-blocks blocks-length))))
+  (let ((blocks (loop :for z :below 16 :append
+                      (loop :for y :below 16 :append
+                            (loop :for x :below 16
+                                  :for noise := (loop :for i :from 1 :to 9 :sum
+                                                      (* (ash 1 i)
+                                                         (noise-3d (/ (+ ox x) (ash 1 (1- i)) 1.0d0)
+                                                                   (/ (+ oy y) (ash 1 (1- i)) 1.0d0)
+                                                                   (/ (+ oz z) (ash 1 (1- i)) 1.0d0))))
+                                  :when (and (< noise 0))
+                                  :collect (v! x y z))))))
+    (when blocks
+      (let* ((blocks-length (length blocks))
+             (gpu-blocks (make-gpu-array blocks :dimensions blocks-length :element-type :vec3))
+             (gpu-stream (make-buffer-stream (list *verts* (cons gpu-blocks 1)) :index-array *index*)))
+        (make-instance 'chunk
+                       :gpu-stream gpu-stream
+                       :gpu-blocks gpu-blocks
+                       :n-blocks blocks-length
+                       :blocks blocks
+                       :offset (v! ox oy oz))))))
 
 ;; WIP
 (defclass chunk-manager ()
@@ -75,23 +79,13 @@
   (:default-initargs
    :chunks nil))
 
-(defmethod loading ((cm chunk-manager))
-  (let ((pos (v! (map 'vector #'floor (v3:* (v! 1/64 1/64 1/64) (camera-pos *camera*))))))
-    (progn (loop :for chunk :in (chunk-manager-chunks *chunks-manager*)
-                 :for gpu-stream := (chunk-gpu-stream chunk)
-                 :for gpu-blocks := (chunk-gpu-blocks chunk)
-                 :do (progn (free gpu-stream)
-                            (free gpu-blocks)))
-           (setf (chunk-manager-chunks *chunks-manager*) nil)
-           (let ((chunk (make-chunk (* (aref pos 0) 64.0) (* (aref pos 1) 64.0) (* (aref pos 2) 64.0))))
-             (when chunk
-               (let* ((gpu-blocks (make-gpu-array (chunk-blocks chunk)
-                                                  :dimensions (chunk-n-blocks chunk) :element-type :vec3))
-                      (gpu-stream (make-buffer-stream (list *verts* (cons gpu-blocks 1))
-                                                      :index-array *index*)))
-                 (setf (chunk-gpu-blocks chunk) gpu-blocks
-                       (chunk-gpu-stream chunk) gpu-stream)
-                 (push chunk (chunk-manager-chunks cm))))))))
+(defmethod loading ((cm chunk-manager) pos)
+  (loop :for chunk :in (chunk-manager-chunks cm)
+        :for chunk-offset := (chunk-offset chunk)
+        :never (v3:= pos chunk-offset)
+        :finally (let ((chunk (make-chunk (aref pos 0) (aref pos 1) (aref pos 2))))
+                   (when chunk
+                     (push chunk (chunk-manager-chunks cm))))))
 
 (defmethod setup ((cm chunk-manager)))
 (defmethod unloading ((cm chunk-manager)))
@@ -118,8 +112,6 @@
   (update-repl-link)
   (clear)
   ;; keyboard events
-  (when (keyboard-button (keyboard) key.c)
-    (loading *chunks-manager*))
   (when (keyboard-button (keyboard) key.r)
     (setf (camera-pos *camera*) (v! 0 0 0)
           (camera-rot *camera*) (q! 1.0 0.0 0.0 0.0)))
@@ -145,6 +137,11 @@
   (when (keyboard-button (keyboard) key.e)
     (v3:incf (camera-pos *camera*)
              (v! 0.0 1.0 0.0)))
+  (let ((pos (map '(SIMPLE-ARRAY SINGLE-FLOAT (3))
+                  #'(lambda (n)
+                      (- n (mod n 16)))
+                  (v3:* (v! 1 0 1) (camera-pos *camera*)))))
+    (loading *chunks-manager* pos))
   (render *chunks-manager*)
   (swap)
   (decay-events))
@@ -181,7 +178,6 @@
     ;;                   (make-texture temp))
     ;;       *sampler* (sample *texture*))
     (setf *chunks-manager* (make-instance 'chunk-manager))
-    (loading *chunks-manager*)
     (loop :while (and running (not (shutting-down-p))) :do
           (continuable (step-demo))))
   (defun stop-loop () (setf running nil)))
